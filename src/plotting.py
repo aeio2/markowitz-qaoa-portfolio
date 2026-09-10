@@ -220,3 +220,118 @@ def weights_figure_plotly(tickers: list[str], weights_by_method: dict[str, np.nd
         height=380,
     )
     return fig
+
+
+# Distinct categorical hues for the 4 backtest series (blue/orange/aqua/violet
+# -- the documented all-pairs-safe subset plus violet, avoiding the yellow/
+# orange collision noted in the palette reference).
+_BACKTEST_STYLE = {
+    "qubo_strategy": {"color": "#2a78d6", "label": "QUBO-selected (10 of 20)", "style": "-"},
+    "equal_weight_control": {"color": "#eb6834", "label": "Equal-weight ALL 20 (control)", "style": "-"},
+    "0050_TW": {"color": "#1baf7a", "label": "0050.TW", "style": "-"},
+    "sp500": {"color": "#4a3aa7", "label": "S&P 500 (raw USD, unhedged)", "style": "-"},
+    # Same asset as 'sp500', converted to TWD -- a dashed variant of the same
+    # color rather than a new hue, since it's a currency lens on one series,
+    # not a competing strategy.
+    "sp500_twd": {"color": "#4a3aa7", "label": "S&P 500 (TWD-adjusted)", "style": "--"},
+}
+
+
+def plot_backtest_equity_curves(curves: pd.DataFrame, output_path: str) -> None:
+    """Save a static comparison chart of cumulative equity curves.
+
+    curves: DataFrame indexed by rebalance date, one column per series,
+    matching the keys in _BACKTEST_STYLE.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+    for col in curves.columns:
+        style = _BACKTEST_STYLE.get(col, {"color": _INK_SECONDARY, "label": col, "style": "-"})
+        ax.plot(curves.index, curves[col], color=style["color"], linewidth=2.2,
+                 linestyle=style["style"], label=style["label"])
+
+    ax.set_ylabel("Growth of NT$1 / $1 (cumulative, indexed)")
+    ax.set_title("Taiwan Large-Cap QUBO Selection vs. 0050.TW vs. S&P 500 (out-of-sample, quarterly rebalance)")
+    ax.legend(loc="upper left", fontsize=9)
+    ax.grid(color=_GRIDLINE, linewidth=0.8)
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:.1f}x"))
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
+# Distinct hues for the live-tracking chart (portfolio tool). Same palette
+# family as _BACKTEST_STYLE; kept separate since series names differ.
+_LIVE_STYLE = {
+    "portfolio": {"color": "#2a78d6", "label": "Your portfolio", "style": "-", "width": 3},
+    "0050.TW": {"color": "#1baf7a", "label": "0050.TW", "style": "-", "width": 1.8},
+    "0056.TW": {"color": "#eda100", "label": "0056.TW", "style": "-", "width": 1.8},
+    "00878.TW": {"color": "#e87ba4", "label": "00878.TW", "style": "-", "width": 1.8},
+    "sp500_twd": {"color": "#4a3aa7", "label": "S&P 500 (TWD-adjusted)", "style": "--", "width": 1.8},
+}
+
+
+def plot_live_tracking(curves: dict[str, "pd.Series"]):
+    """Interactive Plotly line chart: portfolio + benchmark curves since
+    the portfolio's inception date, indexed to 1.0 at the start.
+    """
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    for key, series in curves.items():
+        style = _LIVE_STYLE.get(key, {"color": _INK_SECONDARY, "label": key, "style": "-", "width": 1.8})
+        fig.add_trace(go.Scatter(
+            x=series.index, y=series.values, mode="lines",
+            line=dict(color=style["color"], width=style["width"], dash="dash" if style["style"] == "--" else "solid"),
+            name=style["label"],
+            hovertemplate=f"{style['label']}<br>%{{x|%Y-%m-%d}}: %{{y:.3f}}x<extra></extra>",
+        ))
+
+    fig.update_layout(
+        plot_bgcolor=_SURFACE,
+        paper_bgcolor=_SURFACE,
+        font=dict(color=_INK_PRIMARY, family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+        xaxis=dict(title=None, gridcolor=_GRIDLINE, tickfont=dict(color=_INK_MUTED)),
+        yaxis=dict(title="Growth (indexed to 1.0 at inception)", gridcolor=_GRIDLINE, tickfont=dict(color=_INK_MUTED)),
+        legend=dict(bgcolor=_SURFACE, bordercolor=_GRIDLINE, borderwidth=1, orientation="h", yanchor="bottom", y=1.02, x=0),
+        margin=dict(l=60, r=20, t=60, b=40),
+        height=440,
+    )
+    return fig
+
+
+# Diverging pair (blue/red) for the weekly win/loss diff -- a value that's
+# genuinely signed around zero (A ahead vs. B ahead), not a categorical
+# identity, so this uses the diverging pair rather than categorical hues.
+_DIVERGING_POS = "#2a78d6"
+_DIVERGING_NEG = "#e34948"
+
+
+def plot_periodic_win_loss(df: "pd.DataFrame", label_a: str):
+    """Bar chart of each period's return difference (label_a - label_b),
+    colored by sign -- which periods label_a (e.g. the QUBO selection)
+    actually won, not just the aggregate over the whole window.
+    """
+    import plotly.graph_objects as go
+
+    colors = [_DIVERGING_POS if d >= 0 else _DIVERGING_NEG for d in df["diff"]]
+    fig = go.Figure(go.Bar(
+        x=df["period_start"], y=df["diff"],
+        marker=dict(color=colors),
+        hovertemplate="Week of %{x|%Y-%m-%d}<br>diff: %{y:+.2%}<extra></extra>",
+    ))
+    fig.add_hline(y=0, line=dict(color=_INK_MUTED, width=1))
+    fig.update_layout(
+        plot_bgcolor=_SURFACE,
+        paper_bgcolor=_SURFACE,
+        font=dict(color=_INK_PRIMARY, family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+        xaxis=dict(title=None, gridcolor=_GRIDLINE, tickfont=dict(color=_INK_MUTED)),
+        yaxis=dict(title=f"{label_a} return − other return", tickformat="+.1%", gridcolor=_GRIDLINE, tickfont=dict(color=_INK_MUTED)),
+        margin=dict(l=60, r=20, t=20, b=40),
+        height=340,
+        showlegend=False,
+    )
+    return fig
