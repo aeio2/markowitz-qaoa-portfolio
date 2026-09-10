@@ -1,0 +1,17 @@
+# ONLY needed for experiments/ -- the QUBO/Ising formulation and the QAOA
+# benchmark that was measured and then rejected (see experiments/README.md).
+# Nothing in src/ imports these.
+#
+# Install on top of requirements.txt:
+#     .venv/bin/pip install -r requirements.txt -r requirements-experiments.txt
+#
+# Pinned to versions verified working together. qiskit-finance 0.4.1 (now
+# maintained under the qiskit-community org) removed deprecated code paths
+# in 0.4.x -- PortfolioOptimization lives in qiskit_finance.applications
+# here, NOT qiskit_optimization.applications as older tutorials assume.
+# Don't upgrade these independently without re-checking import paths.
+qiskit==2.5.1
+qiskit-aer==0.17.2
+qiskit-algorithms==0.4.0
+qiskit-finance==0.4.1
+qiskit-optimization==0.7.0

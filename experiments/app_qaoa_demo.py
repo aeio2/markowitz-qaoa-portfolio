@@ -19,7 +19,8 @@ from pathlib import Path
 import numpy as np
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from data import annualized_moments, fetch_prices
 from classical_mpt import (

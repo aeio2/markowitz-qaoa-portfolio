@@ -99,7 +99,7 @@ def plot_frontier(
 
     ax.set_xlabel("Annualized volatility (risk)")
     ax.set_ylabel("Annualized expected return")
-    ax.set_title("Markowitz Efficient Frontier vs. Cardinality-Constrained (QUBO/QAOA) Portfolios")
+    ax.set_title("Markowitz Efficient Frontier vs. Cardinality-Constrained Portfolios")
     ax.legend(loc="best", fontsize=9)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
@@ -226,7 +226,7 @@ def weights_figure_plotly(tickers: list[str], weights_by_method: dict[str, np.nd
 # -- the documented all-pairs-safe subset plus violet, avoiding the yellow/
 # orange collision noted in the palette reference).
 _BACKTEST_STYLE = {
-    "qubo_strategy": {"color": "#2a78d6", "label": "QUBO-selected (10 of 20)", "style": "-"},
+    "mv_strategy": {"color": "#2a78d6", "label": "MV-selected (10 of 20)", "style": "-"},
     "equal_weight_control": {"color": "#eb6834", "label": "Equal-weight ALL 20 (control)", "style": "-"},
     "0050_TW": {"color": "#1baf7a", "label": "0050.TW", "style": "-"},
     "sp500": {"color": "#4a3aa7", "label": "S&P 500 (raw USD, unhedged)", "style": "-"},
@@ -253,7 +253,7 @@ def plot_backtest_equity_curves(curves: pd.DataFrame, output_path: str) -> None:
                  linestyle=style["style"], label=style["label"])
 
     ax.set_ylabel("Growth of NT$1 / $1 (cumulative, indexed)")
-    ax.set_title("Taiwan Large-Cap QUBO Selection vs. 0050.TW vs. S&P 500 (out-of-sample, quarterly rebalance)")
+    ax.set_title("Taiwan Large-Cap MV Selection vs. 0050.TW vs. S&P 500 (out-of-sample, quarterly rebalance)")
     ax.legend(loc="upper left", fontsize=9)
     ax.grid(color=_GRIDLINE, linewidth=0.8)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:.1f}x"))
@@ -312,7 +312,7 @@ _DIVERGING_NEG = "#e34948"
 
 def plot_periodic_win_loss(df: "pd.DataFrame", label_a: str):
     """Bar chart of each period's return difference (label_a - label_b),
-    colored by sign -- which periods label_a (e.g. the QUBO selection)
+    colored by sign -- which periods label_a (e.g. the MV selection)
     actually won, not just the aggregate over the whole window.
     """
     import plotly.graph_objects as go

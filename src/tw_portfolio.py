@@ -19,8 +19,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from qubo_portfolio import build_cardinality_qubo
-from quantum_solver import solve_exact
+from portfolio_selection import build_cardinality_problem, solve_exact
 from tw_data import CACHE_DIR, add_custom_ticker, build_candidate_prices
 
 STATE_PATH = CACHE_DIR / "default_portfolio.json"
@@ -40,7 +39,7 @@ class PortfolioState:
     inception_prices: dict[str, float]
     objective: float
     candidate_pool: list[dict] = field(default_factory=list)
-    # The exact variance-covariance matrix (annualized) the QUBO optimized
+    # The exact variance-covariance matrix (annualized) the selection optimized
     # against, plus the ticker order it's indexed by -- kept so ex-ante
     # portfolio variance can be recomputed for whatever subset of the pool
     # the user is currently holding (see ex_ante_volatility below), without
@@ -48,7 +47,7 @@ class PortfolioState:
     sigma_tickers: list[str] = field(default_factory=list)
     sigma_annualized: list[list[float]] = field(default_factory=list)
     # mu (annualized expected return per candidate, same order as
-    # sigma_tickers) -- the other half of what the QUBO optimized
+    # sigma_tickers) -- the other half of what the selection optimized
     # (q*wSw - mu*w). Stored so per-candidate return/vol/Sharpe can be
     # shown while editing holdings, from the exact numbers that drove
     # selection, not a fresh estimate.
@@ -83,14 +82,14 @@ def compute_default_portfolio(
     force_include: list[str] | None = None,
 ) -> PortfolioState:
     """Fetch the current TWSE/TPEx top-`pool_size` candidate pool, solve
-    the cardinality-constrained QUBO (choose `budget` of `pool_size`)
+    the cardinality-constrained MV (choose `budget` of `pool_size`)
     using trailing `lookback_years` of returns ending today, and return
     the resulting portfolio as a fresh PortfolioState (inception = today).
 
     extra_tickers: user-supplied tickers to fold into the candidate pool
     before optimizing (e.g. a stock they specifically want considered).
     force_include: tickers that MUST be in the final selection --
-    implemented by fixing those QUBO variables to 1 before solving.
+    implemented by fixing those MV variables to 1 before solving.
     """
     today = date.today()
     fetch_start = (pd.Timestamp(today) - pd.Timedelta(days=int(lookback_years * 365.25) + 30)).date().isoformat()
@@ -106,15 +105,11 @@ def compute_default_portfolio(
     sigma = (log_ret.cov() * 252).values
     tickers_all = list(prices.columns)
 
-    qp, _ = build_cardinality_qubo(mu, sigma, budget=budget, risk_factor=risk_factor)
-    if force_include:
-        fixed = {t: 1 for t in force_include if t in tickers_all}
-        if fixed:
-            qp = qp.substitute_variables({f"x_{tickers_all.index(t)}": 1 for t in fixed})
+    problem = build_cardinality_problem(mu, sigma, budget=budget, risk_factor=risk_factor)
+    forced_idx = [tickers_all.index(t) for t in (force_include or []) if t in tickers_all]
 
-    run = solve_exact(qp)
-    x = run.result.x if not force_include else _reconstruct_full_solution(run, tickers_all, force_include)
-    selected = [t for t, bit in zip(tickers_all, x) if round(bit) == 1]
+    run = solve_exact(problem, force_include=forced_idx)
+    selected = [t for t, bit in zip(tickers_all, run.x) if round(bit) == 1]
 
     inception_prices = {t: float(prices[t].iloc[-1]) for t in selected}
     names = {row["yf_ticker"]: row["name"] for _, row in pool.iterrows() if row["yf_ticker"] in selected}
@@ -126,7 +121,7 @@ def compute_default_portfolio(
         inception_date=today.isoformat(),
         pool_size=pool_size, budget=budget, risk_factor=risk_factor, lookback_years=lookback_years,
         tickers=selected, names=names, inception_prices=inception_prices,
-        objective=float(run.result.fval),
+        objective=float(run.fval),
         candidate_pool=pool.to_dict(orient="records"),
         sigma_tickers=tickers_all,
         sigma_annualized=sigma.tolist(),
@@ -138,7 +133,7 @@ def compute_default_portfolio(
 
 def ex_ante_volatility(state: PortfolioState, held: list[str]) -> tuple[float | None, list[str]]:
     """Equal-weighted portfolio volatility from the SAME annualized
-    variance-covariance matrix (Sigma) the QUBO optimized against at
+    variance-covariance matrix (Sigma) the selection optimized against at
     selection time: vol = sqrt(w^T Sigma w), w = 1/len(held) for each
     held ticker. This is "ex-ante" -- what the optimizer expected, not
     what actually happened (see realized volatility in the tool for that).
@@ -168,7 +163,7 @@ def ex_ante_volatility(state: PortfolioState, held: list[str]) -> tuple[float | 
 
 def candidate_stats(state: PortfolioState, held: list[str], risk_free_rate: float = 0.0) -> pd.DataFrame:
     """Per-candidate expected return / volatility / Sharpe, straight from
-    the exact mu and diag(Sigma) that drove the QUBO's selection -- for
+    the exact mu and diag(Sigma) that drove the selection -- for
     deciding how to edit holdings, not a fresh estimate. Individual
     volatility here is each stock's own std. dev. (sqrt(Sigma_ii)),
     which deliberately ignores covariance with the rest of the portfolio
@@ -198,23 +193,6 @@ def candidate_stats(state: PortfolioState, held: list[str], risk_free_rate: floa
             "held": t in held,
         })
     return pd.DataFrame(rows).sort_values("sharpe", ascending=False).reset_index(drop=True)
-
-
-def _reconstruct_full_solution(run, tickers_all: list[str], force_include: list[str]) -> np.ndarray:
-    """qp.substitute_variables renumbers remaining free variables, so
-    run.result.x is shorter than len(tickers_all) when variables were
-    fixed. Re-expand to a full-length 0/1 vector aligned with
-    tickers_all: fixed tickers -> 1, solved free variables -> in order.
-    """
-    fixed_set = set(t for t in force_include if t in tickers_all)
-    full = np.zeros(len(tickers_all))
-    free_idx = [i for i, t in enumerate(tickers_all) if t not in fixed_set]
-    for i, bit in zip(free_idx, run.result.x):
-        full[i] = bit
-    for i, t in enumerate(tickers_all):
-        if t in fixed_set:
-            full[i] = 1
-    return full
 
 
 def allocate_shares(

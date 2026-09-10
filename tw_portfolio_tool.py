@@ -1,7 +1,7 @@
-"""Taiwan QUBO Portfolio Tool.
+"""Taiwan Cardinality-Constrained Portfolio Tool.
 
 A tool, not a demo: on open it shows the current recommended portfolio
-(computed once via cardinality-constrained QUBO/exact solve over a
+(computed once via exact cardinality-constrained mean-variance selection over a
 liquidity-screened TWSE/TPEx large-cap pool, cached), how it has
 actually performed in TWD since the day it was created, and how that
 compares to 0050 / 0056 / 00878 / the S&P 500 (currency-adjusted) over
@@ -14,8 +14,6 @@ Run with: .venv/bin/streamlit run tw_portfolio_tool.py
 from __future__ import annotations
 
 import sys
-import threading
-import time
 from pathlib import Path
 
 import numpy as np
@@ -28,8 +26,6 @@ from tw_data import CACHE_DIR, cached_series, fetch_yf_history
 from tw_portfolio import (
     PortfolioState, allocate_shares, candidate_stats, compute_default_portfolio, ex_ante_volatility, load_state,
 )
-from qubo_portfolio import build_cardinality_qubo
-from quantum_solver import check_versions, solve_qaoa
 from tw_backtest import periodic_win_loss
 from plotting import plot_live_tracking, plot_periodic_win_loss
 
@@ -39,22 +35,16 @@ BENCHMARKS = {
     "00878.TW": "國泰永續高股息",
 }
 
-st.set_page_config(page_title="Taiwan QUBO Portfolio Tool", page_icon="🎯", layout="wide")
-
-_version_warning = check_versions()
-if _version_warning:
-    st.error(_version_warning, icon="🚨")
-
+st.set_page_config(page_title="Taiwan Cardinality Portfolio Tool", page_icon="🎯", layout="wide")
 
 def _init_state() -> None:
     st.session_state.setdefault("portfolio", load_state())
     st.session_state.setdefault("held_override", None)
-    st.session_state.setdefault("qaoa_job", None)
 
 
 _init_state()
 
-st.title("🎯 Taiwan QUBO Portfolio Tool")
+st.title("🎯 Taiwan Cardinality Portfolio Tool")
 st.caption(
     "Cardinality-constrained mean-variance selection over TWSE/TPEx large caps, "
     "tracked live in TWD against 0050 / 0056 / 00878 / S&P 500."
@@ -62,7 +52,7 @@ st.caption(
 
 with st.sidebar:
     st.header("Portfolio settings")
-    pool_size = st.slider("Candidate pool size", 10, 25, 20, help="= qubit count for the QUBO/QAOA solve")
+    pool_size = st.slider("Candidate pool size", 10, 25, 20, help="= number of binary variables in the selection problem")
     budget = st.slider("Stocks to hold (K)", 3, pool_size - 1, min(10, pool_size - 1))
     risk_factor = st.slider("Risk aversion (q)", 0.0, 2.0, 0.5, step=0.05)
     lookback_years = st.slider("Lookback window (years)", 0.5, 3.0, 2.0, step=0.5)
@@ -77,7 +67,7 @@ with st.sidebar:
     st.caption("Recomputing resets the live-tracking start date to today.")
 
 if recompute:
-    with st.spinner("Fetching TWSE/TPEx universe and solving the QUBO..."):
+    with st.spinner("Fetching TWSE/TPEx universe and solving the selection..."):
         try:
             extras = [extra_ticker.strip()] if extra_ticker.strip() else None
             forced = extras if (extras and force_include) else None
@@ -130,7 +120,7 @@ with st.expander("Per-candidate return / volatility / Sharpe (to inform edits ab
     else:
         st.caption(
             "Sorted by Sharpe descending. **mu** and **volatility** are each stock's own annualized "
-            "expected return and std. dev. from the exact μ/Σ that drove the QUBO's selection (not a "
+            "expected return and std. dev. from the exact μ/Σ that drove the the selection (not a "
             "fresh estimate) — volatility here is each stock alone, ignoring covariance with the rest "
             "of the portfolio; that's a property of the stock, not of any specific combination. For "
             "portfolio-level (covariance-aware) volatility of what's actually held, see the Risk "
@@ -268,7 +258,7 @@ r1, r2, r3, r4 = st.columns(4)
 r1.metric(
     "Ex-ante volatility (from Σ)",
     f"{ex_ante_vol:.2%}" if ex_ante_vol is not None else "N/A",
-    help="sqrt(wᵀΣw), equal weights, using the SAME annualized variance-covariance matrix the QUBO "
+    help="sqrt(wᵀΣw), equal weights, using the SAME annualized variance-covariance matrix the MV "
          "optimized against at selection time -- a model prediction, not an observation. Covariance "
          "terms (off-diagonal Σ) are included by construction, not just each stock's own variance.",
 )
@@ -276,10 +266,10 @@ r2.metric(
     "Ex-ante, equal-weight ALL pool",
     f"{ex_ante_vol_equal:.2%}" if ex_ante_vol_equal is not None else "N/A",
     delta=f"{ex_ante_vol - ex_ante_vol_equal:+.2%}" if (ex_ante_vol is not None and ex_ante_vol_equal is not None) else None,
-    delta_color="inverse",  # lower QUBO vol vs. the naive control shows as "good" (green)
+    delta_color="inverse",  # lower MV vol vs. the naive control shows as "good" (green)
     help="Same sqrt(wᵀΣw) formula, but w = equal weight across ALL candidates in the pool -- the "
          "'naive control,' computed immediately from the same Σ, no waiting on live data. This is "
-         "how to compare QUBO-selected vs. equal-weight risk RIGHT NOW without needing realized "
+         "how to compare MV-selected vs. equal-weight risk RIGHT NOW without needing realized "
          "history: both numbers exist the moment the portfolio is computed.",
 )
 r3.metric(
@@ -302,7 +292,7 @@ st.caption(
     "they have decades of real trading history, so genuine realized volatility for them is "
     "available *right now*, just not through this live tracker (too new to be informative yet). "
     "Use section 5 below with a window of a year or more: it computes real, comparable annualized "
-    "volatility for the QUBO strategy, the equal-weight control, 0050, and S&P 500 together, using "
+    "volatility for the MV strategy, the equal-weight control, 0050, and S&P 500 together, using "
     "proper out-of-sample rolling re-selection at each rebalance — not today's fixed basket "
     "backfilled, which is the mistake this tool used to make (see 'On not backfilling realized "
     "volatility' in the README)."
@@ -317,7 +307,7 @@ if ex_ante_gap:
 st.caption(
     "Where Σ is used: `src/tw_portfolio.py`'s `compute_default_portfolio()` estimates Σ (annualized "
     "sample covariance of daily log returns over the lookback window) and hands it straight to the "
-    "QUBO (`q · wᵀΣw − μᵀw`) that selects this portfolio — the same matrix, not a re-estimate, "
+    "objective (`q · wᵀΣw − μᵀw`) that selects this portfolio — the same matrix, not a re-estimate, "
     "drives both ex-ante numbers above via `ex_ante_volatility()`. Realized volatility and the Sharpe "
     "ratio use actual observed prices instead, since Σ only reflects what was true as of the "
     "lookback window ending at selection time."
@@ -408,96 +398,9 @@ st.download_button(
     mime="text/csv",
 )
 
-st.subheader("4. Quantum verification (optional)")
-st.caption(
-    "Re-solves the same QUBO with QAOA instead of exact diagonalization, on the pool/budget/risk "
-    "settings the current portfolio was computed with — exact is what actually drives the "
-    "recommendation above; this is a cross-check, not a better answer."
-)
-qaoa_col1, qaoa_col2 = st.columns([1, 2])
-with qaoa_col1:
-    qaoa_reps = st.slider("QAOA reps", 1, 3, 1, key="qaoa_reps")
-    qaoa_maxiter = st.slider("COBYLA maxiter", 10, 100, 30, key="qaoa_maxiter")
-
-    # Exponential, not quadratic -- statevector simulation cost is
-    # fundamentally O(2^n). Calibrated on two real measurements from this
-    # project: 10 qubits/reps=1/maxiter=50 -> 200s (4s/iter), and 20
-    # qubits/reps=1/maxiter=20 -> still running after 59 min of CPU time
-    # (>=180s/iter, lower bound only). That's a ~45x per-iteration jump
-    # for +10 qubits -> per-iter(n) = 4s * 1.51^(n-10). A quadratic model
-    # badly undersold this in an earlier version of this estimate.
-    n_qubits = state.pool_size
-    per_iter_s = 4 * (1.51 ** (n_qubits - 10))
-    est_s = per_iter_s * qaoa_maxiter * qaoa_reps
-    est_low_min, est_high_min = max(1, round(est_s / 60 * 0.5)), round(est_s / 60 * 2.5)
-    st.warning(
-        f"At {n_qubits} qubits, this configuration is a **rough order-of-magnitude estimate of "
-        f"{est_low_min}-{est_high_min} minutes** — wide range because it's extrapolated from just two "
-        "measurements. Grounded in this project's own benchmarks, not a guess: 20 qubits at "
-        "reps=1/maxiter=20 was still running after nearly an hour of CPU time in testing. Runs in the "
-        "background so the rest of the tool stays usable. Lower the pool size, reps, or maxiter for a "
-        "faster (rougher) check.",
-        icon="⏱️",
-    )
-
-    qaoa_job = st.session_state["qaoa_job"]
-    qaoa_running = qaoa_job is not None and qaoa_job["status"] == "running"
-    if st.button("Run QAOA verification", disabled=qaoa_running):
-        try:
-            tickers_all = pool_df["yf_ticker"].tolist()
-            prices_hist = _fetch_live_history(
-                tuple(tickers_all),
-                (pd.Timestamp(state.inception_date) - pd.Timedelta(days=int(state.lookback_years * 365.25))).date().isoformat(),
-            )
-            window = prices_hist.dropna()
-            log_ret = np.log(window / window.shift(1)).dropna()
-            mu = (log_ret.mean() * 252).values
-            sigma = (log_ret.cov() * 252).values
-            qp, _ = build_cardinality_qubo(mu, sigma, budget=state.budget, risk_factor=state.risk_factor)
-
-            job = {"status": "running", "run": None, "error": None, "start_time": time.time(), "tickers": tickers_all}
-
-            def _worker(qp=qp, reps=qaoa_reps, maxiter=qaoa_maxiter, job=job):
-                try:
-                    job["run"] = solve_qaoa(qp, reps=reps, maxiter=maxiter)
-                    job["status"] = "done"
-                except Exception as e:  # noqa: BLE001
-                    job["error"] = str(e)
-                    job["status"] = "error"
-
-            threading.Thread(target=_worker, daemon=True).start()
-            st.session_state["qaoa_job"] = job
-            st.rerun()
-        except Exception as e:
-            st.error(f"Could not start QAOA verification: {e}")
-
-with qaoa_col2:
-    @st.fragment(run_every=2)
-    def _qaoa_status():
-        job = st.session_state["qaoa_job"]
-        if job is None:
-            st.caption("Not run yet.")
-            return
-        if job["status"] == "running":
-            st.info(f"Running... elapsed {time.time()-job['start_time']:.0f}s", icon="⏳")
-        elif job["status"] == "error":
-            st.error(f"Failed: {job['error']}")
-        elif job["status"] == "done":
-            run = job["run"]
-            selected = [t for t, bit in zip(job["tickers"], run.result.x) if round(bit) == 1]
-            gap = run.result.fval - state.objective
-            st.success(f"QAOA finished in {run.wall_time_s:.0f}s. objective={run.result.fval:.4f} "
-                       f"(gap vs exact = {gap:+.4f})")
-            agree = set(selected) == set(state.tickers)
-            st.write(("✅ Same selection as the exact solver." if agree else
-                      f"⚠️ Different selection: {[t for t in selected if t not in state.tickers]} in, "
-                      f"{[t for t in state.tickers if t not in selected]} out."))
-
-    _qaoa_status()
-
-with st.expander("5. Historical backtest reference (choose your own window)"):
+with st.expander("4. Historical backtest reference (choose your own window)"):
     st.caption(
-        "Supporting context, not the live number above: how the same pool-size/budget/risk-factor QUBO "
+        "Supporting context, not the live number above: how the same pool-size/budget/risk-factor selection "
         "selection would have performed holding from a date you pick through another date you pick "
         "(today by default). **Deliberately not fixed to a long window** — a strategy's edge can be "
         "short-lived (see 'On alpha decay' in the README); testing a week or a month, not just multi-year "
@@ -555,7 +458,7 @@ with st.expander("5. Historical backtest reference (choose your own window)"):
             curve_sp500_twd = fx_adjusted_benchmark_curve(hist_sp500, hist_fx, dates)
 
             out = pd.DataFrame({
-                "qubo_strategy": strategy_curve, "equal_weight_control": control_curve,
+                "mv_strategy": strategy_curve, "equal_weight_control": control_curve,
                 "0050_TW": curve_0050, "sp500_twd": curve_sp500_twd,
             })
             Path("outputs").mkdir(exist_ok=True)
@@ -564,7 +467,7 @@ with st.expander("5. Historical backtest reference (choose your own window)"):
 
             n_years_hist = max(window_days / 365.25, 1 / 252)  # floor so a 1-day window doesn't divide-by-~0
             summary_rows = []
-            for label, curve in [("QUBO-selected", strategy_curve), ("Equal-weight control", control_curve),
+            for label, curve in [("MV-selected", strategy_curve), ("Equal-weight control", control_curve),
                                   ("0050.TW", curve_0050), ("S&P 500 (TWD-adj)", curve_sp500_twd)]:
                 tot = curve.iloc[-1] / curve.iloc[0] - 1
                 ann = (curve.iloc[-1] / curve.iloc[0]) ** (1 / n_years_hist) - 1
@@ -583,7 +486,7 @@ with st.expander("5. Historical backtest reference (choose your own window)"):
                 width="stretch", hide_index=True,
             )
 
-st.subheader("6. Weekly win/loss: your selection vs. equal-weight-all")
+st.subheader("5. Weekly win/loss: your selection vs. equal-weight-all")
 st.caption(
     "Two FIXED baskets, same as the Risk section above — your currently held tickers vs. equal-weight "
     "across the whole candidate pool. Neither is re-optimized within a period; this isn't a rolling "
@@ -633,37 +536,37 @@ if st.button("Compare weekly"):
     if wl_held_complete.empty or wl_all_complete.empty:
         st.error("Not enough overlapping price history in this window to compare.")
     else:
-        qubo_wl_curve = (wl_held_complete / wl_held_complete.iloc[0]).mean(axis=1)
+        mv_wl_curve = (wl_held_complete / wl_held_complete.iloc[0]).mean(axis=1)
         equal_wl_curve = (wl_all_complete / wl_all_complete.iloc[0]).mean(axis=1)
-        wl_df = periodic_win_loss(qubo_wl_curve, equal_wl_curve, "QUBO", "Equal-weight", freq="W-MON")
+        wl_df = periodic_win_loss(mv_wl_curve, equal_wl_curve, "MV", "Equal-weight", freq="W-MON")
 
         if wl_df.empty:
             st.info("Window too short for even one full week — pick an earlier start date.")
         else:
             n_weeks = len(wl_df)
-            n_qubo_wins = int((wl_df["winner"] == "QUBO").sum())
+            n_mv_wins = int((wl_df["winner"] == "MV").sum())
             n_ties = int((wl_df["winner"] == "Tie").sum())
-            win_rate = n_qubo_wins / n_weeks
+            win_rate = n_mv_wins / n_weeks
             avg_diff = float(wl_df["diff"].mean())
 
             m1, m2, m3 = st.columns(3)
             m1.metric("Weeks compared", n_weeks)
-            m2.metric("QUBO won", f"{n_qubo_wins}/{n_weeks} ({win_rate:.0%})",
+            m2.metric("MV won", f"{n_mv_wins}/{n_weeks} ({win_rate:.0%})",
                       help=f"{n_ties} tie(s) counted in neither side's total.")
             m3.metric(
                 "Avg weekly diff", f"{avg_diff:+.2%}",
-                help="Mean(QUBO week return − Equal-weight week return), an unweighted average across "
+                help="Mean(MV week return − Equal-weight week return), an unweighted average across "
                      "weeks — not the same number as comparing the two curves' total return over the "
                      "whole window (a few large weeks can dominate the aggregate but not this average).",
             )
 
-            st.plotly_chart(plot_periodic_win_loss(wl_df, "QUBO"), width="stretch")
+            st.plotly_chart(plot_periodic_win_loss(wl_df, "MV"), width="stretch")
 
             display_wl = wl_df.copy()
             display_wl["period_start"] = display_wl["period_start"].dt.date
             display_wl["period_end"] = display_wl["period_end"].dt.date
             st.dataframe(
-                display_wl.style.format({"QUBO": "{:+.2%}", "Equal-weight": "{:+.2%}", "diff": "{:+.2%}"})
+                display_wl.style.format({"MV": "{:+.2%}", "Equal-weight": "{:+.2%}", "diff": "{:+.2%}"})
                 .background_gradient(subset=["diff"], cmap="RdYlGn"),
                 width="stretch", hide_index=True,
             )

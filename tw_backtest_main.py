@@ -1,11 +1,11 @@
-"""Run the Taiwan large-cap QUBO stock-selection backtest end-to-end:
+"""Run the Taiwan large-cap cardinality-constrained stock-selection backtest end-to-end:
 
   1. Build a top-N TWSE/TPEx candidate pool by market cap (liquidity-screened),
      dropping any candidate without enough price history for the backtest
      window and pulling in the next-ranked name instead.
   2. Roll forward through rebalance dates; at each one, select `--budget` of
-     the pool using only trailing (out-of-sample) return data, via the exact
-     QUBO/Ising solver.
+     the pool using only trailing (out-of-sample) return data, via exact
+     enumeration of every feasible subset.
   3. Chain realized period returns into an equity curve, with an equal-
      weight-all-candidates control to isolate the selection step's effect
      from the candidate pool's own construction.
@@ -37,7 +37,6 @@ from tw_backtest import (
     run_backtest, run_equal_weight_baseline, equity_curve, benchmark_curve,
     fx_adjusted_benchmark_curve, summarize,
 )
-from quantum_solver import check_versions
 from plotting import plot_backtest_equity_curves
 
 
@@ -61,9 +60,6 @@ def main() -> None:
     args = parse_args()
     end = args.end or date.today().isoformat()
 
-    version_warning = check_versions()
-    if version_warning:
-        print(f"WARNING: {version_warning}")
 
     fetch_start = (pd.Timestamp(args.start) - pd.Timedelta(days=int(args.lookback_years * 365.25) + 30)).date().isoformat()
 
@@ -87,7 +83,7 @@ def main() -> None:
     strategy_curve = equity_curve(periods)
     dates = list(strategy_curve.index)
 
-    print(f"\n[3/4] Control: equal-weight all {len(candidate_tickers)} candidates, no QUBO selection")
+    print(f"\n[3/4] Control: equal-weight all {len(candidate_tickers)} candidates, no mean-variance selection")
     control_periods = run_equal_weight_baseline(candidates, args.rebalance, args.start, end)
     control_curve = equity_curve(control_periods)
 
@@ -100,7 +96,7 @@ def main() -> None:
     print(f"  TWD/USD: {fx_start:.2f} -> {fx_end:.2f} ({fx_end/fx_start-1:+.2%} TWD move vs USD over the window)")
     n_years = (dates[-1] - dates[0]).days / 365.25
     results = [
-        (f"QUBO-selected ({args.budget} of {len(candidate_tickers)})", strategy_curve),
+        (f"MV-selected ({args.budget} of {len(candidate_tickers)})", strategy_curve),
         (f"Equal-weight ALL {len(candidate_tickers)} (control)", control_curve),
         ("0050.TW", curve_0050),
         ("S&P 500 (raw USD, unhedged)", curve_sp500),
@@ -116,14 +112,14 @@ def main() -> None:
         print(f"  {name:34s} total={total_return:+8.2%}  annualized={annualized:+8.2%}  "
               f"vol={vol_annualized:.2%}  sharpe={sharpe:.2f}")
 
-    qubo_ann = (strategy_curve.iloc[-1] / strategy_curve.iloc[0]) ** (1 / n_years) - 1
+    mv_ann = (strategy_curve.iloc[-1] / strategy_curve.iloc[0]) ** (1 / n_years) - 1
     control_ann = (control_curve.iloc[-1] / control_curve.iloc[0]) ** (1 / n_years) - 1
-    print(f"\n  Selection effect (QUBO annualized - control annualized): {qubo_ann - control_ann:+.2%}")
-    print("  (Isolates the QUBO mean-variance selection's contribution from the")
+    print(f"\n  Selection effect (MV annualized - control annualized): {mv_ann - control_ann:+.2%}")
+    print("  (Isolates the mean-variance selection's contribution from the")
     print("   candidate pool's own look-ahead-biased construction -- see README.)")
 
     out = pd.DataFrame({
-        "qubo_strategy": strategy_curve,
+        "mv_strategy": strategy_curve,
         "equal_weight_control": control_curve,
         "0050_TW": curve_0050,
         "sp500": curve_sp500,

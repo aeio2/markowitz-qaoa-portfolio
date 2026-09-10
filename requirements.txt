@@ -1,14 +1,6 @@
-# Pinned to versions verified working together in this project.
-# qiskit-finance 0.4.1 (now maintained under the qiskit-community org)
-# removed deprecated code paths in 0.4.x -- e.g. PortfolioOptimization
-# lives in qiskit_finance.applications here, NOT
-# qiskit_optimization.applications as older tutorials assume. Don't
-# upgrade these independently without re-checking import paths.
-qiskit==2.5.1
-qiskit-aer==0.17.2
-qiskit-algorithms==0.4.0
-qiskit-finance==0.4.1
-qiskit-optimization==0.7.0
+# Core dependencies. Everything that produces a number in the backtest,
+# the portfolio tool, or the efficient frontier runs on these alone --
+# no quantum stack required.
 numpy==2.2.3
 pandas==2.2.3
 scipy==1.15.2

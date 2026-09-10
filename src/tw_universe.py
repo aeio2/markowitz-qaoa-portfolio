@@ -1,9 +1,9 @@
 """Build a Taiwan-listed stock universe (TWSE 上市 + TPEx 上櫃) and rank it
 down to a liquidity/market-cap top-N candidate pool small enough to feed
-into the cardinality-constrained QUBO/QAOA selection in qubo_portfolio.py.
+into the cardinality-constrained selection in portfolio_selection.py.
 
-Why a pre-filter is necessary: the QUBO formulation used here assigns one
-binary (qubit) per candidate asset. TWSE+TPEx together list ~2000
+Why a pre-filter is necessary: the selection problem here assigns one
+binary variable per candidate asset. TWSE+TPEx together list ~2000
 securities -- solving "choose 10 of ~2000" would need ~2000 qubits, far
 beyond any simulator (or current real quantum hardware). Narrowing to a
 liquid, large-cap top-N (~20) first keeps the combinatorial selection
@@ -109,7 +109,7 @@ def build_top_n_universe(n: int = 20, min_turnover_value: float = 10_000_000) ->
     """Combine TWSE+TPEx, screen out illiquid names (turnover below
     min_turnover_value on the reference day, default NT$10M), then rank
     by market cap and take the top N -- a liquidity-gated, market-cap-
-    ranked candidate pool small enough for QUBO/QAOA.
+    ranked candidate pool small enough for exact enumeration.
     """
     twse = fetch_twse_universe()
     tpex = fetch_tpex_universe()

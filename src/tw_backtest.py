@@ -1,5 +1,5 @@
 """Out-of-sample, periodically-rebalanced backtest of the cardinality-
-constrained QUBO stock selection on a Taiwan large-cap universe, compared
+constrained cardinality-constrained stock selection on a Taiwan large-cap universe, compared
 against 0050.TW (Taiwan 50 ETF) and the S&P 500 as an opportunity-cost
 benchmark.
 
@@ -11,15 +11,13 @@ Design (see README for the full write-up and its limitations):
     liquidity ranking (see README "Known limitations").
   - At each rebalance date, mu/Sigma are estimated ONLY from a trailing
     lookback window ending at that date (no look-ahead on the return
-    data itself) and fed into the same cardinality-constrained QUBO used
-    in qubo_portfolio.py (choose 10 of 20, equal-weighted).
-  - Selection uses the EXACT solver (NumPyMinimumEigensolver) at every
-    rebalance date. At 20 qubits this is ~0.25s; QAOA at this size took
-    over 10 minutes for a single solve in testing (vs ~200s at 10
-    qubits) -- reusing it at every rebalance date across a multi-year
-    backtest is not tractable on a laptop simulator. QAOA is instead run
-    once, separately, as a same-Hamiltonian quality comparison (see
-    tw_qaoa_comparison.py), not to drive a second backtest curve.
+    data itself) and fed into the same cardinality-constrained objective used
+    in portfolio_selection.py (choose 10 of 20, equal-weighted).
+  - Selection is EXACT at every rebalance date: every feasible subset
+    (C(20,10) = 184,756 of them) is scored directly, so the cardinality
+    constraint is hard and no penalty coefficient has to be tuned. This
+    takes ~0.2s per rebalance. See experiments/ for the QUBO/QAOA
+    formulation this replaced and the timings that ruled QAOA out.
 """
 from __future__ import annotations
 
@@ -28,8 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from qubo_portfolio import build_cardinality_qubo
-from quantum_solver import solve_exact
+from portfolio_selection import build_cardinality_problem, solve_exact
 
 
 @dataclass
@@ -132,15 +129,15 @@ def run_backtest(
         mu = (log_ret.mean() * 252).values
         sigma = (log_ret.cov() * 252).values
 
-        qp, _ = build_cardinality_qubo(mu, sigma, budget=budget, risk_factor=risk_factor)
-        run = solve_exact(qp)
-        selected = [t for t, bit in zip(prices.columns, run.result.x) if round(bit) == 1]
+        problem = build_cardinality_problem(mu, sigma, budget=budget, risk_factor=risk_factor)
+        run = solve_exact(problem)
+        selected = [t for t, bit in zip(prices.columns, run.x) if round(bit) == 1]
 
         start_prices = _price_asof(prices[selected], reb_date)
         end_prices = _price_asof(prices[selected], next_date)
         period_return = float((end_prices / start_prices - 1).mean())  # equal-weighted
 
-        periods.append(RebalancePeriod(reb_date, next_date, selected, period_return, run.result.fval))
+        periods.append(RebalancePeriod(reb_date, next_date, selected, period_return, run.fval))
 
     return periods
 
@@ -148,12 +145,12 @@ def run_backtest(
 def run_equal_weight_baseline(
     prices: pd.DataFrame, rebalance_freq: str, start: str, end: str,
 ) -> list[RebalancePeriod]:
-    """Control strategy: equal-weight ALL candidates (no QUBO selection),
-    rebalanced on the same date grid. Isolates how much of the QUBO
+    """Control strategy: equal-weight ALL candidates (no MV selection),
+    rebalanced on the same date grid. Isolates how much of the MV
     strategy's return comes from the candidate pool itself (which is
     built from today's market caps, a look-ahead simplification -- see
     README) versus the mean-variance selection step on top of it. If
-    this control performs similarly to the QUBO-selected portfolio, the
+    this control performs similarly to the MV-selected portfolio, the
     pool construction -- not the optimization -- explains the result.
     """
     dates = rebalance_dates(start, end, rebalance_freq)
