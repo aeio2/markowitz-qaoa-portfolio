@@ -335,3 +335,93 @@ def plot_periodic_win_loss(df: "pd.DataFrame", label_a: str):
         showlegend=False,
     )
     return fig
+
+
+def backtest_curves_figure_plotly(curves: pd.DataFrame, show_benchmarks: bool = False):
+    """Growth of 1 TWD for the QUBO-selected strategy vs. the equal-weight
+    control (the comparison that isolates the selection step), optionally
+    with 0050.TW and the TWD-adjusted S&P 500 as thinner reference lines.
+    Colors/labels come from _BACKTEST_STYLE so this matches the static PNG.
+    """
+    import plotly.graph_objects as go
+
+    series = ["qubo_strategy", "equal_weight_control"]
+    if show_benchmarks:
+        series += ["0050_TW", "sp500_twd"]
+
+    fig = go.Figure()
+    for col in series:
+        style = _BACKTEST_STYLE[col]
+        main = col in ("qubo_strategy", "equal_weight_control")
+        fig.add_trace(go.Scatter(
+            x=curves.index, y=curves[col],
+            name=style["label"],
+            mode="lines+markers" if main else "lines",
+            line=dict(color=style["color"], width=2.5 if main else 1.5,
+                      dash="dash" if style["style"] == "--" else "solid"),
+            marker=dict(size=5),
+            hovertemplate=f"{style['label']}<br>%{{x|%Y-%m-%d}}: %{{y:.2f}}× <extra></extra>",
+        ))
+
+    fig.update_layout(
+        plot_bgcolor=_SURFACE,
+        paper_bgcolor=_SURFACE,
+        font=dict(color=_INK_PRIMARY, family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+        xaxis=dict(title=None, gridcolor=_GRIDLINE, tickfont=dict(color=_INK_MUTED)),
+        yaxis=dict(title=dict(text="Growth of 1 TWD", font=dict(color=_INK_SECONDARY)),
+                   gridcolor=_GRIDLINE, tickfont=dict(color=_INK_MUTED), ticksuffix="×"),
+        # Explicit legend ink: Streamlit's dark theme otherwise paints legend
+        # text light-on-light against this chart's light surface.
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                    font=dict(color=_INK_PRIMARY), bgcolor=_SURFACE),
+        hovermode="x unified",
+        margin=dict(l=60, r=20, t=40, b=40),
+        height=420,
+    )
+    return fig
+
+
+def backtest_metrics_figure_plotly(metrics: dict[str, dict[str, float]]):
+    """Small multiples (one axis per metric, never a shared dual scale):
+    annualized return, annualized volatility and Sharpe for the QUBO-selected
+    strategy vs. the equal-weight control, values labeled on the bars.
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    panels = [
+        ("annualized_return", "Annualized return", ".1%"),
+        ("annualized_vol", "Annualized volatility", ".1%"),
+        ("sharpe", "Sharpe (no risk-free rate)", ".2f"),
+    ]
+    fig = make_subplots(rows=1, cols=3, subplot_titles=[t for _, t, _ in panels], horizontal_spacing=0.08)
+    for i, (key, _, fmt) in enumerate(panels, start=1):
+        for col in ("qubo_strategy", "equal_weight_control"):
+            style = _BACKTEST_STYLE[col]
+            value = metrics[col][key]
+            fig.add_trace(go.Bar(
+                x=[style["label"].split(" (")[0]], y=[value],
+                name=style["label"],
+                marker=dict(color=style["color"]),
+                text=[format(value, fmt)], textposition="outside",
+                showlegend=(i == 1),
+                hovertemplate=f"{style['label']}<br>%{{y:{fmt}}}<extra></extra>",
+            ), row=1, col=i)
+        top = max(metrics[c][key] for c in ("qubo_strategy", "equal_weight_control"))
+        fig.update_yaxes(range=[0, top * 1.25], tickformat=fmt, gridcolor=_GRIDLINE,
+                         tickfont=dict(color=_INK_MUTED), row=1, col=i)
+        fig.update_xaxes(showticklabels=False, row=1, col=i)
+
+    fig.update_annotations(font=dict(color=_INK_PRIMARY))
+    fig.update_traces(textfont=dict(color=_INK_PRIMARY))
+    fig.update_layout(
+        plot_bgcolor=_SURFACE,
+        paper_bgcolor=_SURFACE,
+        font=dict(color=_INK_PRIMARY, family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="left", x=0,
+                    font=dict(color=_INK_PRIMARY), bgcolor=_SURFACE),
+        bargap=0.25,
+        margin=dict(l=50, r=20, t=50, b=50),
+        height=360,
+    )
+    return fig

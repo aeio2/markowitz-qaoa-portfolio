@@ -83,6 +83,15 @@ in a background thread (with a live elapsed-time indicator) so the rest
 of the UI stays usable while it grinds through the optimizer loop — see
 the runtime warning in the sidebar before cranking up `reps`/`maxiter`.
 
+A second page, **Taiwan Backtest** (sidebar, `pages/1_Taiwan_Backtest.py`),
+shows the out-of-sample Taiwan top-20 backtest as two comparisons of the
+QUBO-selected strategy against the equal-weight-all-20 control: cumulative
+growth (optionally with 0050.TW and the TWD-adjusted S&P 500) and annualized
+return / volatility / Sharpe side by side. It reads the precomputed curves in
+`outputs/tw_backtest_curves.csv` rather than re-running ~23 exact QUBO solves
+per page load; regenerate them with
+`.venv/bin/python3 tw_backtest_main.py --end 2026-08-14`.
+
 ### CLI
 
 ```bash
@@ -120,7 +129,9 @@ src/
   tw_portfolio.py       persisted "default portfolio" state, lot-size share allocation
 main.py               CLI orchestrating the full pipeline
 app.py                Streamlit web app (interactive, background QAOA) -- 10-ticker demo
+pages/1_Taiwan_Backtest.py  Streamlit page: QUBO selection vs. equal-weight control (precomputed backtest)
 tw_backtest_main.py   Taiwan large-cap historical backtest: QUBO selection vs. 0050.TW vs. S&P 500
+                      (also writes outputs/tw_backtest_curves.csv for the Streamlit page)
 tw_portfolio_tool.py  Taiwan QUBO Portfolio Tool -- the live decision tool (see below)
 ```
 

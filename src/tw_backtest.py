@@ -216,6 +216,24 @@ def fx_adjusted_benchmark_curve(
     return pd.Series(vals, index=dates)
 
 
+def curve_metrics(curve: pd.Series, periods_per_year: int) -> dict[str, float]:
+    """Total return, annualized return, annualized volatility and Sharpe
+    (annualized return / annualized vol, no risk-free rate) of an equity
+    curve sampled at rebalance dates. Shared by tw_backtest_main.py and the
+    Streamlit backtest page so both report identical numbers.
+    """
+    n_years = (curve.index[-1] - curve.index[0]).days / 365.25
+    growth = curve.iloc[-1] / curve.iloc[0]
+    annualized = growth ** (1 / n_years) - 1
+    vol = curve.pct_change().dropna().std() * np.sqrt(periods_per_year)
+    return {
+        "total_return": float(growth - 1),
+        "annualized_return": float(annualized),
+        "annualized_vol": float(vol),
+        "sharpe": float(annualized / vol) if vol > 0 else float("nan"),
+    }
+
+
 def summarize(periods: list[RebalancePeriod]) -> str:
     lines = []
     for p in periods:

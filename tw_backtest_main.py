@@ -35,7 +35,7 @@ import pandas as pd
 from tw_data import build_candidate_prices, cached_series
 from tw_backtest import (
     run_backtest, run_equal_weight_baseline, equity_curve, benchmark_curve,
-    fx_adjusted_benchmark_curve, summarize,
+    fx_adjusted_benchmark_curve, summarize, curve_metrics,
 )
 from quantum_solver import check_versions
 from plotting import plot_backtest_equity_curves
@@ -52,6 +52,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--end", default=None, help="Backtest end date (default: today)")
     p.add_argument("--refresh", action="store_true", help="Bypass the local cache and refetch everything")
     p.add_argument("--output", default="outputs/tw_backtest_equity_curves.png")
+    p.add_argument("--curves-csv", default="outputs/tw_backtest_curves.csv",
+                   help="Equity curves as CSV (read by the Streamlit app's backtest section)")
     return p.parse_args()
 
 
@@ -108,13 +110,9 @@ def main() -> None:
     ]
     periods_per_year = {"YS": 1, "QS": 4, "MS": 12}[args.rebalance]
     for name, curve in results:
-        total_return = curve.iloc[-1] / curve.iloc[0] - 1
-        annualized = (curve.iloc[-1] / curve.iloc[0]) ** (1 / n_years) - 1
-        period_rets = curve.pct_change().dropna()
-        vol_annualized = period_rets.std() * np.sqrt(periods_per_year)
-        sharpe = annualized / vol_annualized if vol_annualized > 0 else float("nan")
-        print(f"  {name:34s} total={total_return:+8.2%}  annualized={annualized:+8.2%}  "
-              f"vol={vol_annualized:.2%}  sharpe={sharpe:.2f}")
+        m = curve_metrics(curve, periods_per_year)
+        print(f"  {name:34s} total={m['total_return']:+8.2%}  annualized={m['annualized_return']:+8.2%}  "
+              f"vol={m['annualized_vol']:.2%}  sharpe={m['sharpe']:.2f}")
 
     qubo_ann = (strategy_curve.iloc[-1] / strategy_curve.iloc[0]) ** (1 / n_years) - 1
     control_ann = (control_curve.iloc[-1] / control_curve.iloc[0]) ** (1 / n_years) - 1
@@ -132,6 +130,10 @@ def main() -> None:
     Path("outputs").mkdir(exist_ok=True)
     plot_backtest_equity_curves(out, args.output)
     print(f"\nSaved {args.output}")
+    # The Streamlit app reads these precomputed curves instead of re-running
+    # ~23 exact QUBO solves on every page load.
+    out.to_csv(args.curves_csv, index_label="date")
+    print(f"Saved {args.curves_csv}")
 
 
 if __name__ == "__main__":
